@@ -15,7 +15,6 @@ import "C"
 import (
 	"fmt"
 	"reflect"
-	"unsafe"
 )
 
 // Receiver represents a method receiver.
@@ -23,6 +22,22 @@ type Receiver struct {
 	name    string
 	create  func(args []interface{}) interface{}
 	objects map[*C.struct_engine_receiver]*ReceiverObject
+}
+
+// Create a new receiver which will become a class in PHP, using function fn as
+// a constructor for individual object instances as needed by the PHP context.
+//
+// The class name is assumed to be unique for the active engine.
+//
+// The constructor function accepts a slice of arguments, as passed by the PHP
+// context, and should return a method receiver instance, or nil on error (in
+// which case, an exception is thrown on the PHP object constructor).
+func NewReceiver(name string, fn func(args []interface{}) interface{}) *Receiver {
+	return &Receiver{
+		name:    name,
+		create:  fn,
+		objects: make(map[*C.struct_engine_receiver]*ReceiverObject),
+	}
 }
 
 // NewObject instantiates a new method receiver object, using the Receiver's
@@ -64,17 +79,12 @@ func (r *Receiver) NewObject(args []interface{}) (*ReceiverObject, error) {
 	return obj, nil
 }
 
-// Destroy removes references to the generated PHP class for this receiver and
-// frees any memory used by object instances.
+// Destroy clears the receiver on the Go side
 func (r *Receiver) Destroy() {
 	if r.create == nil {
 		return
 	}
 
-	n := C.CString(r.name)
-	defer C.free(unsafe.Pointer(n))
-
-	C.receiver_destroy(n)
 	r.create = nil
 	r.objects = nil
 }

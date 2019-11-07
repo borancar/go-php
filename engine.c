@@ -106,6 +106,8 @@ static sapi_module_struct engine_module = {
 	STANDARD_SAPI_MODULE_PROPERTIES
 };
 
+extern zend_module_entry gophp_module_entry;
+
 struct php_engine *engine_init(void) {
 	struct php_engine *engine;
 
@@ -129,7 +131,7 @@ struct php_engine *engine_init(void) {
 	engine_module.ini_entries = malloc(sizeof(engine_ini_defaults));
 	memcpy(engine_module.ini_entries, engine_ini_defaults, sizeof(engine_ini_defaults));
 
-	if (php_module_startup(&engine_module, NULL, 0) == FAILURE) {
+	if (php_module_startup(&engine_module, &gophp_module_entry, 1) == FAILURE) {
 		sapi_shutdown();
 
 		#ifdef ZTS

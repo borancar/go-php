@@ -233,34 +233,49 @@ static zend_object_value receiver_init(zend_class_entry *class_type TSRMLS_DC) {
 	return object;
 }
 
-void receiver_define(char *name) {
-	#ifdef ZTS
-		TSRMLS_FETCH();
-	#endif
+static zend_function_entry gophp_function_entry[] = {
+	PHP_FE_END
+};
 
-	zend_class_entry tmp;
-	INIT_CLASS_ENTRY_EX(tmp, name, strlen(name), NULL);
+static char **receiver_names;
+static unsigned int receiver_len;
 
-	zend_class_entry *this = zend_register_internal_class(&tmp TSRMLS_CC);
-	this->create_object = receiver_init;
-	this->ce_flags |= ZEND_ACC_FINAL;
+ZEND_MINIT_FUNCTION(gophp)
+{
+	int i;
+	for (i = 0; i < receiver_len; i++) {
+		zend_class_entry ce;
+		INIT_CLASS_ENTRY_EX(ce, receiver_names[i], strlen(receiver_names[i]), NULL);
+
+		ce.create_object = receiver_init;
+		zend_class_entry *this = zend_register_internal_class(&ce TSRMLS_CC);
+	}
 
 	// Set standard handlers for receiver.
 	zend_object_handlers *std = zend_get_std_object_handlers();
 	receiver_handlers.get_class_name  = std->get_class_name;
 	receiver_handlers.get_class_entry = std->get_class_entry;
+
+	return SUCCESS;
 }
 
-void receiver_destroy(char *name) {
-	#ifdef ZTS
-		TSRMLS_FETCH();
-	#endif
+zend_module_entry gophp_module_entry = {
+	STANDARD_MODULE_HEADER,
+	"gophp",                    /* extension name */
+	gophp_function_entry,       /* function list */
+	ZEND_MINIT(gophp),          /* process startup */
+	NULL,                       /* process shutdown */
+	NULL,                       /* request startup */
+	NULL,                       /* request shutdown */
+	NULL,                       /* extension info */
+	"0.12",                     /* extension version */
+	STANDARD_MODULE_PROPERTIES
+};
 
-	zend_class_entry  **c;
-	name = php_strtolower(name, strlen(name));
+void receiver_module_init(int n_receivers) {
+	receiver_names = (char **) calloc(n_receivers, sizeof(char*));
+}
 
-	if (zend_hash_find(CG(class_table), name, strlen(name), (void **) &c) == SUCCESS) {
-		destroy_zend_class(c);
-		zend_hash_del_key_or_index(CG(class_table), name, strlen(name), 0, HASH_DEL_KEY);
-	}
+void receiver_define(char *name) {
+	receiver_names[receiver_len++] = strdup(name);
 }

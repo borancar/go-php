@@ -33,22 +33,35 @@ type Engine struct {
 // This contains a reference to the active engine, if any.
 var engine *Engine
 
+type ReceiverNewFn = func(args []interface{}) interface{}
+
 // New initializes a PHP engine instance on which contexts can be executed. It
 // corresponds to PHP's MINIT (module init) phase.
-func New() (*Engine, error) {
+//
+// Takes a map of receiver->constructor which will be registered PHP classes
+// under the go-php module.
+func New(receivers map[string]ReceiverNewFn) (*Engine, error) {
 	if engine != nil {
 		return nil, fmt.Errorf("Cannot activate multiple engine instances")
 	}
 
-	ptr, err := C.engine_init()
-	if err != nil {
-		return nil, fmt.Errorf("PHP engine failed to initialize")
-	}
-
 	engine = &Engine{
-		engine:    ptr,
 		contexts:  make(map[*C.struct_engine_context]*Context),
 		receivers: make(map[string]*Receiver),
+	}
+
+	C.receiver_module_init(C.int(len(receivers)))
+	for rcvrName, newFn := range receivers {
+		engine.receivers[rcvrName] = NewReceiver(rcvrName, newFn)
+		name := C.CString(rcvrName)
+		C.receiver_define(name)
+		C.free(unsafe.Pointer(name))
+	}
+
+	var err error
+	engine.engine, err = C.engine_init()
+	if err != nil {
+		return nil, fmt.Errorf("PHP engine failed to initialize")
 	}
 
 	return engine, nil
@@ -75,39 +88,13 @@ func (e *Engine) NewContext() (*Context, error) {
 	return ctx, nil
 }
 
-// Define registers a PHP class for the name passed, using function fn as
-// constructor for individual object instances as needed by the PHP context.
-//
-// The class name registered is assumed to be unique for the active engine.
-//
-// The constructor function accepts a slice of arguments, as passed by the PHP
-// context, and should return a method receiver instance, or nil on error (in
-// which case, an exception is thrown on the PHP object constructor).
-func (e *Engine) Define(name string, fn func(args []interface{}) interface{}) error {
-	if _, exists := e.receivers[name]; exists {
-		return fmt.Errorf("Failed to define duplicate receiver '%s'", name)
-	}
-
-	rcvr := &Receiver{
-		name:    name,
-		create:  fn,
-		objects: make(map[*C.struct_engine_receiver]*ReceiverObject),
-	}
-
-	n := C.CString(name)
-	defer C.free(unsafe.Pointer(n))
-
-	C.receiver_define(n)
-	e.receivers[name] = rcvr
-
-	return nil
-}
-
 // Destroy shuts down and frees any resources related to the PHP engine bindings.
 func (e *Engine) Destroy() {
 	if e.engine == nil {
 		return
 	}
+
+	C.engine_shutdown(e.engine)
 
 	for _, r := range e.receivers {
 		r.Destroy()
@@ -121,7 +108,6 @@ func (e *Engine) Destroy() {
 
 	e.contexts = nil
 
-	C.engine_shutdown(e.engine)
 	e.engine = nil
 
 	engine = nil

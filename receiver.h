@@ -7,8 +7,8 @@
 
 struct engine_receiver;
 
+void receiver_module_init(int n_receivers);
 void receiver_define(char *name);
-void receiver_destroy(char *name);
 char *receiver_get_name(struct engine_receiver *rcvr);
 
 #endif
