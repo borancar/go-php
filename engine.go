@@ -141,6 +141,23 @@ func write(w io.Writer, buffer unsafe.Pointer, length C.uint) C.int {
 	return C.int(written)
 }
 
+func read(r io.Reader, buffer unsafe.Pointer, length C.uint) C.int {
+	if r == nil {
+		return C.int(0)
+	}
+
+	// From https://github.com/golang/go/wiki/cgo#turning-c-arrays-into-go-slices
+	// To create a Go slice backed by a C array (without copying the original
+	// data), one needs to acquire this length at runtime and use a type
+	// conversion to a pointer to a very big array and then slice it to the
+	// length that you want (also remember to set the cap if you're using Go
+	// 1.2 or later)
+	slice := (*[1 << 28]byte)(buffer)[:int(length):int(length)]
+	bytesRead, _ := r.Read(slice)
+
+	return C.int(bytesRead)
+}
+
 //export engineWriteOut
 func engineWriteOut(ctx *C.struct_engine_context, buffer unsafe.Pointer, length C.uint) C.int {
 	if engine == nil {
@@ -156,6 +173,23 @@ func engineWriteOut(ctx *C.struct_engine_context, buffer unsafe.Pointer, length 
 	}
 
 	return write(context.Output, buffer, length)
+}
+
+//export engineReadIn
+func engineReadIn(ctx *C.struct_engine_context, buffer unsafe.Pointer, length C.uint) C.int {
+	if engine == nil {
+		return 0
+	}
+
+	engine.ctxmutex.RLock()
+	context, ok := engine.contexts[ctx]
+	engine.ctxmutex.RUnlock()
+
+	if !ok {
+		return 0
+	}
+
+	return read(context.Input, buffer, length)
 }
 
 //export engineWriteLog

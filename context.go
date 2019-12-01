@@ -27,6 +27,10 @@ type Context struct {
 	Output io.Writer
 	Log    io.Writer
 
+	// Input is a reader used for regular input. If left unset, 0 bytes will be
+	// read every time and EOF returned.
+	Input io.ReadCloser
+
 	// Header represents the HTTP headers set by current PHP context.
 	Header http.Header
 

@@ -64,6 +64,12 @@ static void engine_send_header(sapi_header_struct *sapi_header, void *server_con
 	// Do nothing.
 }
 
+static int engine_read_post(char *buffer, uint count_bytes TSRMLS_DC) {
+	struct engine_context *context = SG(server_context);
+
+	return engineReadIn(context, buffer, count_bytes);
+}
+
 static char *engine_read_cookies(TSRMLS_D) {
 	return NULL;
 }
@@ -99,7 +105,7 @@ static sapi_module_struct engine_module = {
 	NULL,                        // Send Headers Handler
 	engine_send_header,          // Send Header Handler
 
-	NULL,                        // Read POST Data
+	engine_read_post,            // Read POST Data
 	engine_read_cookies,         // Read Cookies
 
 	engine_register_variables,   // Register Server Variables
