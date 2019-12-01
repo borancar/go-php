@@ -213,6 +213,7 @@ static void receiver_free(void *object TSRMLS_DC) {
 	struct engine_receiver *this = (struct engine_receiver *) object;
 
 	zend_object_std_dtor(&this->obj TSRMLS_CC);
+	engineReceiverDestroy(this);
 	efree(this);
 }
 
