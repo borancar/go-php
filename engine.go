@@ -20,6 +20,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"unsafe"
 )
 
@@ -28,6 +29,8 @@ type Engine struct {
 	engine    *C.struct_php_engine
 	contexts  map[*C.struct_engine_context]*Context
 	receivers map[string]*Receiver
+	ctxmutex  sync.RWMutex
+	rcvrmutex sync.RWMutex
 }
 
 // This contains a reference to the active engine, if any.
@@ -83,9 +86,20 @@ func (e *Engine) NewContext() (*Context, error) {
 	}
 
 	// Store reference to context, using pointer as key.
+	e.ctxmutex.Lock()
 	e.contexts[ptr] = ctx
+	e.ctxmutex.Unlock()
 
 	return ctx, nil
+}
+
+// DestroyContext destroys the given context and removes it from the active
+// engine. This corresponds to PHP's RSHUTDOWN (request shutdown) phase.
+func (e *Engine) DestroyContext(context *Context) {
+	context.Destroy()
+	e.ctxmutex.Lock()
+	delete(e.contexts, context.context)
+	e.ctxmutex.Unlock()
 }
 
 // Destroy shuts down and frees any resources related to the PHP engine bindings.
@@ -129,25 +143,49 @@ func write(w io.Writer, buffer unsafe.Pointer, length C.uint) C.int {
 
 //export engineWriteOut
 func engineWriteOut(ctx *C.struct_engine_context, buffer unsafe.Pointer, length C.uint) C.int {
-	if engine == nil || engine.contexts[ctx] == nil {
+	if engine == nil {
 		return -1
 	}
 
-	return write(engine.contexts[ctx].Output, buffer, length)
+	engine.ctxmutex.RLock()
+	context, ok := engine.contexts[ctx]
+	engine.ctxmutex.RUnlock()
+
+	if !ok {
+		return -1
+	}
+
+	return write(context.Output, buffer, length)
 }
 
 //export engineWriteLog
 func engineWriteLog(ctx *C.struct_engine_context, buffer unsafe.Pointer, length C.uint) C.int {
-	if engine == nil || engine.contexts[ctx] == nil {
+	if engine == nil {
 		return -1
 	}
 
-	return write(engine.contexts[ctx].Log, buffer, length)
+	engine.ctxmutex.RLock()
+	context, ok := engine.contexts[ctx]
+	engine.ctxmutex.RUnlock()
+
+	if !ok {
+		return -1
+	}
+
+	return write(context.Log, buffer, length)
 }
 
 //export engineSetHeader
 func engineSetHeader(ctx *C.struct_engine_context, operation C.uint, buffer unsafe.Pointer, length C.uint) {
-	if engine == nil || engine.contexts[ctx] == nil {
+	if engine == nil {
+		return
+	}
+
+	engine.ctxmutex.RLock()
+	context, ok := engine.contexts[ctx]
+	engine.ctxmutex.RUnlock()
+
+	if !ok {
 		return
 	}
 
@@ -161,15 +199,15 @@ func engineSetHeader(ctx *C.struct_engine_context, operation C.uint, buffer unsa
 	switch operation {
 	case 0: // Replace header.
 		if len(split) == 2 && split[1] != "" {
-			engine.contexts[ctx].Header.Set(split[0], split[1])
+			context.Header.Set(split[0], split[1])
 		}
 	case 1: // Append header.
 		if len(split) == 2 && split[1] != "" {
-			engine.contexts[ctx].Header.Add(split[0], split[1])
+			context.Header.Add(split[0], split[1])
 		}
 	case 2: // Delete header.
 		if split[0] != "" {
-			engine.contexts[ctx].Header.Del(split[0])
+			context.Header.Del(split[0])
 		}
 	}
 }
@@ -193,19 +231,40 @@ func engineReceiverNew(rcvr *C.struct_engine_receiver, args unsafe.Pointer) C.in
 		return 1
 	}
 
+	engine.rcvrmutex.Lock()
 	engine.receivers[n].objects[rcvr] = obj
+	engine.rcvrmutex.Unlock()
 
 	return 0
 }
 
+//export engineReceiverDestroy
+func engineReceiverDestroy(rcvr *C.struct_engine_receiver) {
+	if engine == nil {
+		return
+	}
+
+	n := C.GoString(C.receiver_get_name(rcvr))
+	engine.rcvrmutex.Lock()
+	delete(engine.receivers[n].objects, rcvr)
+	engine.rcvrmutex.Unlock()
+}
+
 //export engineReceiverGet
 func engineReceiverGet(rcvr *C.struct_engine_receiver, name *C.char) unsafe.Pointer {
-	n := C.GoString(C.receiver_get_name(rcvr))
-	if engine == nil || engine.receivers[n].objects[rcvr] == nil {
+	if engine == nil {
 		return nil
 	}
 
-	val, err := engine.receivers[n].objects[rcvr].Get(C.GoString(name))
+	n := C.GoString(C.receiver_get_name(rcvr))
+	engine.rcvrmutex.RLock()
+	receiverObj, ok := engine.receivers[n].objects[rcvr]
+	engine.rcvrmutex.RUnlock()
+	if !ok {
+		return nil
+	}
+
+	val, err := receiverObj.Get(C.GoString(name))
 	if err != nil {
 		return nil
 	}
@@ -215,8 +274,15 @@ func engineReceiverGet(rcvr *C.struct_engine_receiver, name *C.char) unsafe.Poin
 
 //export engineReceiverSet
 func engineReceiverSet(rcvr *C.struct_engine_receiver, name *C.char, val unsafe.Pointer) {
+	if engine == nil {
+		return
+	}
+
 	n := C.GoString(C.receiver_get_name(rcvr))
-	if engine == nil || engine.receivers[n].objects[rcvr] == nil {
+	engine.rcvrmutex.RLock()
+	receiverObj, ok := engine.receivers[n].objects[rcvr]
+	engine.rcvrmutex.RUnlock()
+	if !ok {
 		return
 	}
 
@@ -225,17 +291,24 @@ func engineReceiverSet(rcvr *C.struct_engine_receiver, name *C.char, val unsafe.
 		return
 	}
 
-	engine.receivers[n].objects[rcvr].Set(C.GoString(name), v.Interface())
+	receiverObj.Set(C.GoString(name), v.Interface())
 }
 
 //export engineReceiverExists
 func engineReceiverExists(rcvr *C.struct_engine_receiver, name *C.char) C.int {
-	n := C.GoString(C.receiver_get_name(rcvr))
-	if engine == nil || engine.receivers[n].objects[rcvr] == nil {
+	if engine == nil {
 		return 0
 	}
 
-	if engine.receivers[n].objects[rcvr].Exists(C.GoString(name)) {
+	n := C.GoString(C.receiver_get_name(rcvr))
+	engine.rcvrmutex.RLock()
+	receiverObj, ok := engine.receivers[n].objects[rcvr]
+	engine.rcvrmutex.RUnlock()
+	if !ok {
+		return 0
+	}
+
+	if receiverObj.Exists(C.GoString(name)) {
 		return 1
 	}
 
@@ -244,8 +317,15 @@ func engineReceiverExists(rcvr *C.struct_engine_receiver, name *C.char) C.int {
 
 //export engineReceiverCall
 func engineReceiverCall(rcvr *C.struct_engine_receiver, name *C.char, args unsafe.Pointer) unsafe.Pointer {
+	if engine == nil {
+		return nil
+	}
+
 	n := C.GoString(C.receiver_get_name(rcvr))
-	if engine == nil || engine.receivers[n].objects[rcvr] == nil {
+	engine.rcvrmutex.RLock()
+	receiverObj, ok := engine.receivers[n].objects[rcvr]
+	engine.rcvrmutex.RUnlock()
+	if !ok {
 		return nil
 	}
 
@@ -257,7 +337,7 @@ func engineReceiverCall(rcvr *C.struct_engine_receiver, name *C.char, args unsaf
 
 	defer va.Destroy()
 
-	val := engine.receivers[n].objects[rcvr].Call(C.GoString(name), va.Slice())
+	val := receiverObj.Call(C.GoString(name), va.Slice())
 	if val == nil {
 		return nil
 	}
