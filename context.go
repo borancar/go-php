@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"runtime"
 	"unsafe"
 )
 
@@ -113,4 +114,6 @@ func (c *Context) Destroy() {
 		C.context_destroy(c.context)
 		c.context = nil
 	}
+
+	runtime.UnlockOSThread()
 }

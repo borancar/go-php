@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"runtime"
 	"strings"
 	"sync"
 	"unsafe"
@@ -74,6 +75,7 @@ func New(receivers map[string]ReceiverNewFn) (*Engine, error) {
 // an error if the execution context failed to initialize at any point. This
 // corresponds to PHP's RINIT (request init) phase.
 func (e *Engine) NewContext() (*Context, error) {
+	runtime.LockOSThread()
 	ptr, err := C.context_new()
 	if err != nil {
 		return nil, fmt.Errorf("Failed to initialize context for PHP engine")
