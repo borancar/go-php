@@ -53,15 +53,20 @@ static int engine_header_handler(sapi_header_struct *sapi_header, sapi_header_op
 	case SAPI_HEADER_REPLACE:
 	case SAPI_HEADER_ADD:
 	case SAPI_HEADER_DELETE:
-		engineSetHeader(context, op, (void *) sapi_header->header, sapi_header->header_len);
+		engineSetHeader(context, op, (void *) sapi_header->header, sapi_header->header_len, sapi_headers->http_response_code);
 		break;
 	}
 
 	return 0;
 }
 
-static void engine_send_header(sapi_header_struct *sapi_header, void *server_context TSRMLS_DC) {
-	// Do nothing.
+static int engine_send_headers(sapi_headers_struct *sapi_headers TSRMLS_DC) {
+	struct engine_context *context = SG(server_context);
+	int status = SG(sapi_headers).http_response_code;
+
+	engineSendHeaders(context, status);
+
+	return SAPI_HEADER_SENT_SUCCESSFULLY;
 }
 
 static int engine_read_post(char *buffer, uint count_bytes TSRMLS_DC) {
@@ -102,8 +107,8 @@ static sapi_module_struct engine_module = {
 	php_error,                   // Error Handler
 
 	engine_header_handler,       // Header Handler
-	NULL,                        // Send Headers Handler
-	engine_send_header,          // Send Header Handler
+	engine_send_headers,         // Send Headers Handler
+	NULL,                        // Send Header Handler
 
 	engine_read_post,            // Read POST Data
 	engine_read_cookies,         // Read Cookies

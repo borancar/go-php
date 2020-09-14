@@ -25,7 +25,7 @@ type Context struct {
 	// Output and Log are unbuffered writers used for regular and debug output,
 	// respectively. If left unset, any data written into either by the calling
 	// context will be lost.
-	Output io.Writer
+	Output http.ResponseWriter
 	Log    io.Writer
 
 	// Input is a reader used for regular input. If left unset, 0 bytes will be

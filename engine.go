@@ -212,7 +212,7 @@ func engineWriteLog(ctx *C.struct_engine_context, buffer unsafe.Pointer, length 
 }
 
 //export engineSetHeader
-func engineSetHeader(ctx *C.struct_engine_context, operation C.uint, buffer unsafe.Pointer, length C.uint) {
+func engineSetHeader(ctx *C.struct_engine_context, operation C.uint, buffer unsafe.Pointer, length C.uint, statusCode C.int) {
 	if engine == nil {
 		return
 	}
@@ -246,6 +246,27 @@ func engineSetHeader(ctx *C.struct_engine_context, operation C.uint, buffer unsa
 			context.Header.Del(split[0])
 		}
 	}
+}
+
+//export engineSendHeaders
+func engineSendHeaders(ctx *C.struct_engine_context, statusCode C.int) {
+	if engine == nil {
+		return
+	}
+
+	engine.ctxmutex.RLock()
+	context, ok := engine.contexts[ctx]
+	engine.ctxmutex.RUnlock()
+
+	if !ok {
+		return
+	}
+
+	status := int(statusCode)
+	if status == 0 {
+		status = 200
+	}
+	context.Output.WriteHeader(status)
 }
 
 //export engineReceiverNew
